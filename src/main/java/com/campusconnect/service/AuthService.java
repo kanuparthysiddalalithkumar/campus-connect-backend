@@ -32,7 +32,7 @@ public class AuthService {
 
     public AuthResponse register(RegisterRequest request) {
         // Block admin email from being registered via API
-        if ("admin@campus.edu".equalsIgnoreCase(request.getEmail().trim())) {
+        if ("admin@campus.com".equalsIgnoreCase(request.getEmail().trim())) {
             throw new RuntimeException("This email is reserved. Admin account cannot be registered.");
         }
         if (userRepository.existsByEmail(request.getEmail())) {

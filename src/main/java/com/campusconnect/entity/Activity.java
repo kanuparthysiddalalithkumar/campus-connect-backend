@@ -29,6 +29,7 @@ public class Activity {
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "created_by", nullable = false)
+    @com.fasterxml.jackson.annotation.JsonIgnore
     private User createdBy;
 
     private String color;

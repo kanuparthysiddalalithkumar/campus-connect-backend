@@ -21,7 +21,7 @@ public class DataSeeder {
     CommandLineRunner initDatabase(UserRepository userRepository) {
         return args -> {
             // Always ensure one and only one ADMIN exists — never allow registration for admin
-            String adminEmail = "admin@campus.edu";
+            String adminEmail = "admin@campus.com";
 
             boolean adminExists = userRepository.findByEmail(adminEmail).isPresent();
 
