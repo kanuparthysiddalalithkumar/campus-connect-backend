@@ -3,6 +3,7 @@ package com.campusconnect.config;
 import com.zaxxer.hikari.HikariConfig;
 import com.zaxxer.hikari.HikariDataSource;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Primary;
@@ -13,21 +14,17 @@ import javax.sql.DataSource;
  * Converts Railway's DATABASE_URL (postgresql://user:pass@host:port/db)
  * into the JDBC format (jdbc:postgresql://host:port/db) that HikariCP requires.
  *
- * Railway sets DATABASE_URL automatically when you add a PostgreSQL plugin.
- * Spring Boot's auto-configuration uses spring.datasource.url which requires
- * the jdbc: prefix — this bean bridges that gap without any env-var gymnastics.
+ * This bean only activates when DATABASE_URL or SPRING_DATASOURCE_URL is present
+ * in the environment. For local dev, Spring Boot's own autoconfigure kicks in
+ * using the spring.datasource.* properties in application-local.properties.
  */
 @Configuration
 public class DataSourceConfig {
 
-    /**
-     * Falls back to an empty string so the app doesn't crash during local dev
-     * when DATABASE_URL is absent (local dev uses application.properties values instead).
-     */
-    @Value("${DATABASE_URL:}")
+    @Value("${DATABASE_URL:NONE}")
     private String databaseUrl;
 
-    @Value("${SPRING_DATASOURCE_URL:}")
+    @Value("${SPRING_DATASOURCE_URL:NONE}")
     private String springDatasourceUrl;
 
     @Value("${SPRING_DATASOURCE_USERNAME:}")
@@ -39,64 +36,64 @@ public class DataSourceConfig {
     @Bean
     @Primary
     public DataSource dataSource() {
-        HikariConfig config = new HikariConfig();
-
         // --- Resolve JDBC URL ---
-        // Priority 1: SPRING_DATASOURCE_URL (already in jdbc: format, manually set)
-        // Priority 2: DATABASE_URL (Railway native, needs jdbc: prefix added)
-        // Priority 3: local dev fallback handled by Spring Boot autoconfigure (this bean won't activate)
+        // Priority 1: SPRING_DATASOURCE_URL (manually set, may or may not have jdbc: prefix)
+        // Priority 2: DATABASE_URL (set automatically by Railway PostgreSQL plugin)
 
-        String jdbcUrl = null;
+        String rawUrl = null;
 
-        if (springDatasourceUrl != null && !springDatasourceUrl.isBlank()) {
-            jdbcUrl = toJdbcUrl(springDatasourceUrl);
-        } else if (databaseUrl != null && !databaseUrl.isBlank()) {
-            jdbcUrl = toJdbcUrl(databaseUrl);
+        if (!"NONE".equals(springDatasourceUrl) && !springDatasourceUrl.isBlank()) {
+            rawUrl = springDatasourceUrl;
+        } else if (!"NONE".equals(databaseUrl) && !databaseUrl.isBlank()) {
+            rawUrl = databaseUrl;
         }
 
-        if (jdbcUrl == null || jdbcUrl.isBlank()) {
-            // Neither env var is set — return null so Spring Boot autoconfigure takes over
-            // (works for local dev with application.properties hardcoded values)
+        if (rawUrl == null) {
             throw new IllegalStateException(
-                "No database URL configured. Set DATABASE_URL or SPRING_DATASOURCE_URL environment variable."
+                "[CampusConnect] No database URL configured. " +
+                "Set DATABASE_URL (Railway auto-sets this) or SPRING_DATASOURCE_URL."
             );
         }
 
-        config.setJdbcUrl(jdbcUrl);
+        String jdbcUrl = toJdbcUrl(rawUrl);
 
-        // Parse credentials from URL if not supplied as separate env vars
-        if (username != null && !username.isBlank()) {
+        HikariConfig config = new HikariConfig();
+        config.setJdbcUrl(jdbcUrl);
+        config.setDriverClassName("org.postgresql.Driver");
+
+        // Parse credentials from the URL string itself if not set as separate vars
+        if (!username.isBlank()) {
             config.setUsername(username);
         }
-        if (password != null && !password.isBlank()) {
+        if (!password.isBlank()) {
             config.setPassword(password);
         }
 
-        config.setDriverClassName("org.postgresql.Driver");
-
-        // Connection pool tuning for Railway's free tier (limited connections)
+        // Conservative pool settings for Railway free tier (limited connections)
         config.setMaximumPoolSize(5);
         config.setMinimumIdle(1);
-        config.setConnectionTimeout(30000);
-        config.setIdleTimeout(600000);
-        config.setMaxLifetime(1800000);
+        config.setConnectionTimeout(30000);   // 30s
+        config.setIdleTimeout(600000);        // 10min
+        config.setMaxLifetime(1800000);       // 30min
+
+        System.out.println("[CampusConnect] DataSource configured → " +
+            jdbcUrl.replaceAll(":[^:@]+@", ":****@")); // mask password in logs
 
         return new HikariDataSource(config);
     }
 
     /**
-     * Converts postgresql:// or postgres:// URLs to jdbc:postgresql:// format.
-     * If already in jdbc: format, returns as-is.
+     * Ensures the URL always starts with jdbc:postgresql://
+     * Handles:
+     *   postgresql://...  → jdbc:postgresql://...
+     *   postgres://...    → jdbc:postgresql://...
+     *   jdbc:postgresql://... → unchanged
      */
     private String toJdbcUrl(String url) {
         if (url == null || url.isBlank()) return url;
-        if (url.startsWith("jdbc:")) return url;           // already correct
-        if (url.startsWith("postgres://")) {
-            return "jdbc:postgresql://" + url.substring("postgres://".length());
-        }
-        if (url.startsWith("postgresql://")) {
-            return "jdbc:postgresql://" + url.substring("postgresql://".length());
-        }
-        return url; // unknown format — pass through and let JDBC report the error
+        if (url.startsWith("jdbc:")) return url;
+        if (url.startsWith("postgres://"))   return "jdbc:postgresql://" + url.substring("postgres://".length());
+        if (url.startsWith("postgresql://")) return "jdbc:postgresql://" + url.substring("postgresql://".length());
+        return url; // unknown format — pass through
     }
 }

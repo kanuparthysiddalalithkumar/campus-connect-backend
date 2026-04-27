@@ -42,7 +42,7 @@ public class SecurityConfig {
                 .authorizeHttpRequests(auth -> auth
                         // Allow ALL OPTIONS preflight requests without authentication
                         .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
-                        .requestMatchers("/api/auth/**", "/api/users/debug").permitAll()
+                        .requestMatchers("/api/auth/**", "/api/users/debug", "/api/health").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/activities").permitAll()
                         .anyRequest().authenticated()
                 )
