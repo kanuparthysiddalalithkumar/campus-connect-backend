@@ -61,7 +61,7 @@ public class DataSourceConfig {
     @Primary
     public DataSource dataSource() {
         HikariConfig config = new HikariConfig();
-        config.setDriverClassName("org.postgresql.Driver");
+        // Driver is set after URL is resolved (auto-detected per URL scheme)
 
         // --- Strategy 1: SPRING_DATASOURCE_URL (Railway standard JDBC URL) ---
         if (!"NONE".equals(springDatasourceUrl)) {
@@ -92,6 +92,14 @@ public class DataSourceConfig {
         // Override username/password if explicitly set as separate vars
         if (!"NONE".equals(envUsername)) config.setUsername(envUsername);
         if (!"NONE".equals(envPassword)) config.setPassword(envPassword);
+
+        // Auto-detect JDBC driver from URL so MySQL (local) and PostgreSQL (Railway) both work
+        String resolvedUrl = config.getJdbcUrl();
+        if (resolvedUrl != null && (resolvedUrl.startsWith("jdbc:mysql") || resolvedUrl.startsWith("jdbc:mariadb"))) {
+            config.setDriverClassName("com.mysql.cj.jdbc.Driver");
+        } else {
+            config.setDriverClassName("org.postgresql.Driver");
+        }
 
         // Conservative pool for Railway free tier
         config.setMaximumPoolSize(5);
