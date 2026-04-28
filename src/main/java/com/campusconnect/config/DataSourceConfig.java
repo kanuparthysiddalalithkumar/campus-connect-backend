@@ -1,8 +1,7 @@
 package com.campusconnect.config;
 
-import com.zaxxer.hikari.HikariConfig;
-import com.zaxxer.hikari.HikariDataSource;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.jdbc.DataSourceBuilder;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Primary;
@@ -10,8 +9,10 @@ import org.springframework.context.annotation.Primary;
 import javax.sql.DataSource;
 
 /**
- * Robust DataSource configuration for CampusConnect.
- * Automatically handles local MySQL and Railway production environments.
+ * Dynamically configures the DataSource based on the JDBC URL.
+ * - Local dev  → MySQL  (jdbc:mysql://...)
+ * - Railway    → PostgreSQL (jdbc:postgresql://...)
+ * Spring Boot JPA auto-detects the Hibernate dialect from this DataSource.
  */
 @Configuration
 public class DataSourceConfig {
@@ -28,33 +29,24 @@ public class DataSourceConfig {
     @Bean
     @Primary
     public DataSource dataSource() {
-        HikariConfig config = new HikariConfig();
-        
-        // Convert raw PostgreSQL URL format to JDBC format if necessary.
-        // Railway provides DATABASE_URL as postgresql://user:pass@host:port/db,
-        // but HikariCP requires jdbc:postgresql://user:pass@host:port/db.
-        String jdbcUrl = dbUrl.startsWith("postgresql://")
-                ? "jdbc:" + dbUrl
-                : dbUrl;
-
-        config.setJdbcUrl(jdbcUrl);
-        config.setUsername(dbUsername);
-        config.setPassword(dbPassword);
-
-        // Driver Detection
-        if (jdbcUrl.contains("mysql")) {
-            config.setDriverClassName("com.mysql.cj.jdbc.Driver");
-        } else if (jdbcUrl.contains("postgresql")) {
-            config.setDriverClassName("org.postgresql.Driver");
+        // Railway sometimes provides the URL as postgresql:// — convert to jdbc:postgresql://
+        String jdbcUrl = dbUrl;
+        if (jdbcUrl.startsWith("postgresql://")) {
+            jdbcUrl = "jdbc:postgresql://" + jdbcUrl.substring("postgresql://".length());
         }
 
-        // Optimized Connection Pool Settings
-        config.setMaximumPoolSize(10);
-        config.setMinimumIdle(2);
-        config.setIdleTimeout(300000);
-        config.setConnectionTimeout(20000);
-        config.setMaxLifetime(1200000);
-        
-        return new HikariDataSource(config);
+        String driverClass;
+        if (jdbcUrl.contains("mysql")) {
+            driverClass = "com.mysql.cj.jdbc.Driver";
+        } else {
+            driverClass = "org.postgresql.Driver";
+        }
+
+        return DataSourceBuilder.create()
+                .url(jdbcUrl)
+                .username(dbUsername)
+                .password(dbPassword)
+                .driverClassName(driverClass)
+                .build();
     }
 }
