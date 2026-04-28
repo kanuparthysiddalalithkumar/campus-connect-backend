@@ -30,15 +30,21 @@ public class DataSourceConfig {
     public DataSource dataSource() {
         HikariConfig config = new HikariConfig();
         
-        // Use the values directly from application.properties
-        config.setJdbcUrl(dbUrl);
+        // Convert raw PostgreSQL URL format to JDBC format if necessary.
+        // Railway provides DATABASE_URL as postgresql://user:pass@host:port/db,
+        // but HikariCP requires jdbc:postgresql://user:pass@host:port/db.
+        String jdbcUrl = dbUrl.startsWith("postgresql://")
+                ? "jdbc:" + dbUrl
+                : dbUrl;
+
+        config.setJdbcUrl(jdbcUrl);
         config.setUsername(dbUsername);
         config.setPassword(dbPassword);
 
         // Driver Detection
-        if (dbUrl.contains("mysql")) {
+        if (jdbcUrl.contains("mysql")) {
             config.setDriverClassName("com.mysql.cj.jdbc.Driver");
-        } else if (dbUrl.contains("postgresql")) {
+        } else if (jdbcUrl.contains("postgresql")) {
             config.setDriverClassName("org.postgresql.Driver");
         }
 
