@@ -12,32 +12,36 @@ import java.net.URI;
 import java.net.URISyntaxException;
 
 /**
- * Resolves Railway's DATABASE_URL (postgresql://user:pass@host:port/db)
- * into JDBC components that HikariCP understands.
+ * Resolves Railway's database environment variables into a HikariCP DataSource.
  *
- * Railway auto-sets DATABASE_URL when a PostgreSQL service is linked.
- * Spring Boot / JDBC requires jdbc:postgresql:// prefix + separate credentials.
- * This bean bridges that gap reliably.
+ * Resolution order (first match wins):
+ *   1. SPRING_DATASOURCE_URL  – Railway-standard JDBC URL variable
+ *   2. DATABASE_URL           – legacy Railway postgresql:// URL
+ *   3. PGHOST / PGPORT / PGDATABASE / PGUSER / PGPASSWORD – individual PG vars
+ *
+ * @Value keys must use Spring's lowercase dot-notation so that relaxed binding
+ * correctly maps env-var names (e.g. SPRING_DATASOURCE_URL → spring.datasource.url).
  */
 @Configuration
 public class DataSourceConfig {
 
-    // Railway PostgreSQL plugin sets DATABASE_URL automatically
+    // Strategy 1 – Railway standard: SPRING_DATASOURCE_URL (JDBC URL)
+    // @Value must use lowercase dot-notation for Spring relaxed binding to work
+    @Value("${spring.datasource.url:NONE}")
+    private String springDatasourceUrl;
+
+    // Strategy 1 credentials (separate env vars)
+    @Value("${spring.datasource.username:NONE}")
+    private String envUsername;
+
+    @Value("${spring.datasource.password:NONE}")
+    private String envPassword;
+
+    // Strategy 2 – Legacy Railway: DATABASE_URL (postgresql:// URL)
     @Value("${DATABASE_URL:NONE}")
     private String databaseUrl;
 
-    // Fallback: manually set JDBC-style URL (already has jdbc: prefix)
-    @Value("${SPRING_DATASOURCE_URL:NONE}")
-    private String springDatasourceUrl;
-
-    // Optional overrides for username/password (separate from URL)
-    @Value("${SPRING_DATASOURCE_USERNAME:NONE}")
-    private String envUsername;
-
-    @Value("${SPRING_DATASOURCE_PASSWORD:NONE}")
-    private String envPassword;
-
-    // Railway also exposes individual PG variables
+    // Strategy 3 – Individual PG* variables (also exposed by Railway)
     @Value("${PGHOST:NONE}")
     private String pgHost;
 
@@ -59,13 +63,15 @@ public class DataSourceConfig {
         HikariConfig config = new HikariConfig();
         config.setDriverClassName("org.postgresql.Driver");
 
-        // --- Strategy 1: Parse DATABASE_URL (most common on Railway) ---
-        if (!"NONE".equals(databaseUrl)) {
-            applyFromUrl(config, databaseUrl);
-        }
-        // --- Strategy 2: SPRING_DATASOURCE_URL (manually configured) ---
-        else if (!"NONE".equals(springDatasourceUrl)) {
+        // --- Strategy 1: SPRING_DATASOURCE_URL (Railway standard JDBC URL) ---
+        if (!"NONE".equals(springDatasourceUrl)) {
             applyFromUrl(config, springDatasourceUrl);
+            System.out.println("[CampusConnect] DataSource via SPRING_DATASOURCE_URL");
+        }
+        // --- Strategy 2: Parse DATABASE_URL (legacy postgresql:// format) ---
+        else if (!"NONE".equals(databaseUrl)) {
+            applyFromUrl(config, databaseUrl);
+            System.out.println("[CampusConnect] DataSource via DATABASE_URL");
         }
         // --- Strategy 3: Individual PG* variables (Railway also exposes these) ---
         else if (!"NONE".equals(pgHost)) {
@@ -78,7 +84,8 @@ public class DataSourceConfig {
         else {
             throw new IllegalStateException(
                 "[CampusConnect] No database configured! " +
-                "Set DATABASE_URL in Railway by linking a PostgreSQL service."
+                "Please set SPRING_DATASOURCE_URL (and optionally SPRING_DATASOURCE_USERNAME / " +
+                "SPRING_DATASOURCE_PASSWORD) in Railway, or link a PostgreSQL service."
             );
         }
 
